@@ -1,0 +1,64 @@
+name: Publish client release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag (e.g., client-1.0.0)'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure dist exists
+        run: |
+          if [ ! -d dist ]; then echo "dist/ not found. Run 'node assemble-from-local.js' locally and commit dist/ with zip and client-manifest.json"; exit 1; fi
+
+      - name: Fix manifest (compute sha512/size and set URL)
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node ./fix-manifest.js "${{ github.event.inputs.version }}"
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          release_name: ${{ github.event.inputs.version }}
+          body: 'Automated release created by workflow'
+          draft: false
+          prerelease: false
+
+      - name: Find ZIP file
+        id: find_zip
+        run: |
+          ZIP=$(ls dist | grep -E '^StratCraftClient-.*\.zip$' | head -n1)
+          if [ -z "$ZIP" ]; then echo "No zip found in dist"; exit 1; fi
+          echo "::set-output name=path::dist/$ZIP"
+          echo "::set-output name=name::$ZIP"
+
+      - name: Upload ZIP
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_zip.outputs.path }}
+          asset_name: ${{ steps.find_zip.outputs.name }}
+          asset_content_type: application/zip
+
+      - name: Upload manifest
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/client-manifest.json
+          asset_name: client-manifest.json
+          asset_content_type: application/json
